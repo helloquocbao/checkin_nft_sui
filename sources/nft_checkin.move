@@ -55,6 +55,8 @@ public struct LocationRegistry has key {
 public struct BadgeTemplate has copy, drop, store {
     location_name: string::String,
     description: string::String,
+    latitude: string::String, // 🗺️ Thêm vĩ độ
+    longitude: string::String, // 🗺️ Thêm kinh độ
     image_common: string::String,
     image_rare: string::String,
     image_epic: string::String,
@@ -71,6 +73,7 @@ public struct BadgeClaimed has copy, drop {
     profile_id: address,
     owner: address,
     location_id: u64,
+
 }
 
 /// 🎰 Kết quả quay huy hiệu (dùng cho frontend hiển thị)
@@ -156,6 +159,8 @@ entry fun add_location(
     registry: &mut LocationRegistry,
     name: string::String,
     description: string::String,
+    latitude: string::String,
+    longitude: string::String,
     image_common: string::String,
     image_rare: string::String,
     image_epic: string::String,
@@ -168,6 +173,8 @@ entry fun add_location(
     let template = BadgeTemplate {
         location_name: name,
         description,
+        latitude,
+        longitude,
         image_common,
         image_rare,
         image_epic,
