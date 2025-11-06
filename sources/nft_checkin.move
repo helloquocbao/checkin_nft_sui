@@ -240,7 +240,9 @@ entry fun claim_badge(
     let key = BadgeKey { location_id };
 
     // 🧱 Ghi đè badge cũ (nếu có)
-    df::remove<BadgeKey, Badge>(&mut profile.id, key);
+    if (df::exists_(&profile.id, key)) {
+        df::remove<BadgeKey, Badge>(&mut profile.id, key);
+    };
     df::add<BadgeKey, Badge>(&mut profile.id, key, badge);
 
     // 🧾 Cập nhật danh sách claimed (chỉ thêm nếu chưa có)
@@ -280,4 +282,128 @@ public fun total_profiles(registry: &ProfileRegistry): u64 { registry.total_prof
 
 public fun has_minted(registry: &ProfileRegistry, user: address): bool {
     table::contains(&registry.minted_users, user)
+}
+
+// 🔧 Helper functions for marketplace
+
+/// Get profile owner
+public fun owner(profile: &ProfileNFT): address {
+    profile.owner
+}
+
+/// Get profile UID (for dynamic field access)
+public fun profile_uid_mut(profile: &mut ProfileNFT): &mut UID {
+    &mut profile.id
+}
+
+/// Check if badge exists
+public fun has_badge(profile: &ProfileNFT, location_id: u64): bool {
+    let key = BadgeKey { location_id };
+    df::exists_(&profile.id, key)
+}
+
+/// Borrow badge immutably
+public fun borrow_badge(profile: &ProfileNFT, location_id: u64): &Badge {
+    let key = BadgeKey { location_id };
+    df::borrow(&profile.id, key)
+}
+
+/// Borrow badge mutably
+public fun borrow_badge_mut(profile: &mut ProfileNFT, location_id: u64): &mut Badge {
+    let key = BadgeKey { location_id };
+    df::borrow_mut(&mut profile.id, key)
+}
+
+/// Badge getters
+public fun badge_location_name(badge: &Badge): string::String {
+    badge.location_name
+}
+
+public fun badge_description(badge: &Badge): string::String {
+    badge.description
+}
+
+public fun badge_image_url(badge: &Badge): string::String {
+    badge.image_url
+}
+
+public fun badge_rarity(badge: &Badge): u8 {
+    badge.rarity
+}
+
+public fun badge_perfection(badge: &Badge): u64 {
+    badge.perfection
+}
+
+public fun badge_created_at(badge: &Badge): u64 {
+    badge.created_at
+}
+
+/// Create new Badge (for marketplace unwrapping)
+public fun new_badge(
+    location_name: string::String,
+    description: string::String,
+    image_url: string::String,
+    rarity: u8,
+    perfection: u64,
+    created_at: u64,
+): Badge {
+    Badge {
+        location_name,
+        description,
+        image_url,
+        rarity,
+        perfection,
+        created_at,
+    }
+}
+
+/// Destroy badge and return fields (for marketplace wrapping)
+public fun unpack_badge(badge: Badge): (string::String, string::String, string::String, u8, u64, u64) {
+    let Badge {
+        location_name,
+        description,
+        image_url,
+        rarity,
+        perfection,
+        created_at,
+    } = badge;
+    
+    (location_name, description, image_url, rarity, perfection, created_at)
+}
+
+/// Create BadgeKey (for marketplace)
+public fun new_badge_key(location_id: u64): BadgeKey {
+    BadgeKey { location_id }
+}
+
+/// Get badge count
+public fun badge_count(profile: &ProfileNFT): u64 {
+    profile.badge_count
+}
+
+/// Get total locations
+public fun total_locations(registry: &LocationRegistry): u64 {
+    registry.total_locations
+}
+
+// ==================== Test-only functions ====================
+
+#[test_only]
+/// Initialize for testing
+public fun init_for_testing(ctx: &mut tx_context::TxContext) {
+    init(PROFILES {}, ctx);
+}
+
+#[test_only]
+/// Create location registry for testing
+public fun create_location_registry(ctx: &mut tx_context::TxContext) {
+    let deployer = tx_context::sender(ctx);
+    let registry = LocationRegistry {
+        id: object::new(ctx),
+        deployer,
+        total_locations: 0,
+        locations: table::new(ctx),
+    };
+    transfer::share_object(registry);
 }
