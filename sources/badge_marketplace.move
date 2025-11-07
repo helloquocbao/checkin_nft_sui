@@ -31,6 +31,7 @@ public struct BadgeListing has key, store {
     location_id: u64,
     price: u64,
     listed_at: u64,
+    badge_object_id: ID, // ID của TradableBadge trong Kiosk
 }
 
 /// 📦 Badge Wrapper - wrap badge để có thể store trong Kiosk
@@ -87,7 +88,7 @@ fun init(otw: BADGE_MARKETPLACE, ctx: &mut tx_context::TxContext) {
     display::add(&mut display, string::utf8(b"original_owner"), string::utf8(b"{original_owner}"));
     display::update_version(&mut display);
     
-    // 🔐 Create Transfer Policy with royalty
+    // 🔐 Create Transfer Policy (simple version without custom rules for now)
     let (policy, policy_cap) = transfer_policy::new<TradableBadge>(&publisher, ctx);
     
     // 🏪 Create Registry
@@ -104,6 +105,16 @@ fun init(otw: BADGE_MARKETPLACE, ctx: &mut tx_context::TxContext) {
     transfer::public_share_object(policy);
     transfer::public_transfer(policy_cap, deployer);
     transfer::share_object(registry);
+}
+
+/// 🏪 Tạo Kiosk cho user để trade badges
+entry fun create_kiosk(ctx: &mut tx_context::TxContext) {
+    let (kiosk, cap) = kiosk::new(ctx);
+    
+    // Transfer kiosk ownership cap về user
+    transfer::public_transfer(cap, sender(ctx));
+    // Share kiosk để mọi người có thể xem và mua
+    transfer::public_share_object(kiosk);
 }
 
 /// 📤 List badge để bán (extract từ Profile và list vào marketplace)
@@ -159,6 +170,7 @@ entry fun list_badge(
         location_id,
         price,
         listed_at: clock::timestamp_ms(clock),
+        badge_object_id: tradable_id,
     };
     
     let listing_addr = object::uid_to_address(&listing.id);
@@ -187,7 +199,14 @@ entry fun buy_badge(
     ctx: &mut tx_context::TxContext,
 ) {
     let buyer_addr = sender(ctx);
-    let BadgeListing { id, seller, location_id: _location_id, price, listed_at: _ } = listing;
+    let BadgeListing { 
+        id, 
+        seller, 
+        location_id: _location_id, 
+        price, 
+        listed_at: _, 
+        badge_object_id 
+    } = listing;
     let listing_addr = object::uid_to_address(&id);
     object::delete(id);
     
@@ -195,30 +214,18 @@ entry fun buy_badge(
     let paid_amount = coin::value(&payment);
     assert!(paid_amount >= price, 2);
     
-    // 💎 Tính royalty
-    let royalty_amount = (price * registry.royalty_bps) / 10000;
-    let seller_amount = price - royalty_amount;
-    
-    // 💰 Split payment
-    let mut pay = payment;
-    let royalty_coin = coin::split<SUI>(&mut pay, royalty_amount, ctx);
-    let seller_coin = coin::split<SUI>(&mut pay, seller_amount, ctx);
-    
-    // 💵 Transfer funds
-    transfer::public_transfer(royalty_coin, registry.deployer);
-    transfer::public_transfer(seller_coin, seller);
-    transfer::public_transfer(pay, buyer_addr); // Trả lại phần dư
-    
-    // 🛒 Purchase từ kiosk (simplified - without transfer policy for now)
-    // Note: In production, you'd need to properly handle TransferRequest
+    // 🛒 Purchase từ kiosk với Transfer Policy
     let (badge, request) = kiosk::purchase<TradableBadge>(
         seller_kiosk,
-        object::id_from_address(listing_addr),
-        coin::zero<SUI>(ctx)
+        badge_object_id,
+        payment
     );
     
-    // ✅ Confirm transfer policy
-    let (_item, _paid, _from) = transfer_policy::confirm_request(policy, request);
+    // ✅ Confirm transfer policy - Kiosk automatically handles payment distribution
+    let (_item, _paid_amount, _from) = transfer_policy::confirm_request(policy, request);
+    
+    // 💎 Calculate royalty for event (estimation)
+    let royalty_amount = (price * registry.royalty_bps) / 10000;
     
     // 📦 Unwrap badge và add vào Profile của buyer
     let TradableBadge {
@@ -272,12 +279,18 @@ entry fun delist_badge(
     listing: BadgeListing,
     kiosk: &mut Kiosk,
     cap: &KioskOwnerCap,
-    badge_id: ID,
     ctx: &tx_context::TxContext,
 ) {
     let sender_addr = sender(ctx);
     
-    let BadgeListing { id, seller, location_id: _location_id, price: _, listed_at: _ } = listing;
+    let BadgeListing { 
+        id, 
+        seller, 
+        location_id: _location_id, 
+        price: _, 
+        listed_at: _, 
+        badge_object_id 
+    } = listing;
     let listing_addr = object::uid_to_address(&id);
     
     // 🔒 Verify ownership
@@ -287,8 +300,8 @@ entry fun delist_badge(
     object::delete(id);
     
     // 🛒 Delist và take từ kiosk
-    kiosk::delist<TradableBadge>(kiosk, cap, badge_id);
-    let badge = kiosk::take<TradableBadge>(kiosk, cap, badge_id);
+    kiosk::delist<TradableBadge>(kiosk, cap, badge_object_id);
+    let badge = kiosk::take<TradableBadge>(kiosk, cap, badge_object_id);
     
     // 📦 Unwrap và trả về Profile
     let TradableBadge {
